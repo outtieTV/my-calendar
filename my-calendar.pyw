@@ -1,12 +1,9 @@
 import sys
 import os
-import calendar
 import configparser
 
-from datetime import date
-
 from PyQt6.QtCore import Qt, QDate, QTime
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -26,15 +23,18 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QDialogButtonBox,
     QSizePolicy,
+    QListWidget,
+    QListWidgetItem,
+    QFrame,
+    QScrollArea,
 )
 
 
-# ---------------------------------------------------------
+# =========================================================
 # Configuration
-# ---------------------------------------------------------
+# =========================================================
 
-# Store config.ini in the same directory as this script,
-# regardless of the current working directory.
+# config.ini is always stored beside this script.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "config.ini")
 
@@ -47,17 +47,22 @@ REPEAT_OPTIONS = [
 ]
 
 
-# ---------------------------------------------------------
-# Event dialog
-# ---------------------------------------------------------
+# =========================================================
+# Event Dialog
+# =========================================================
 
 class EventDialog(QDialog):
     """
-    Dialog for creating or editing a calendar event.
+    Dialog for creating a calendar event.
 
-    The date is initialized with the selected calendar day.
-    The user can change the date, time, repeat interval,
-    title, and description.
+    Includes:
+        Date
+        Time
+        Repeat
+        Title
+        Description
+        Save
+        Cancel
     """
 
     def __init__(self, selected_date, parent=None):
@@ -65,12 +70,12 @@ class EventDialog(QDialog):
 
         self.setWindowTitle("Add Event")
         self.setModal(True)
-        self.resize(420, 400)
+        self.resize(450, 430)
 
         self.setup_ui(selected_date)
 
     def setup_ui(self, selected_date):
-        """Create and arrange the event input widgets."""
+        """Create the event input widgets."""
 
         layout = QVBoxLayout(self)
 
@@ -109,13 +114,13 @@ class EventDialog(QDialog):
         self.description_edit.setPlaceholderText(
             "Enter event description..."
         )
-        self.description_edit.setMinimumHeight(100)
+        self.description_edit.setMinimumHeight(120)
 
         form_layout.addRow("Description:", self.description_edit)
 
         layout.addLayout(form_layout)
 
-        # Save and Cancel buttons
+        # Save and Cancel
         self.button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save
             | QDialogButtonBox.StandardButton.Cancel,
@@ -130,17 +135,18 @@ class EventDialog(QDialog):
             QDialogButtonBox.StandardButton.Cancel
         ).setText("Cancel")
 
-        self.button_box.accepted.connect(self.validate_and_accept)
+        self.button_box.accepted.connect(
+            self.validate_and_accept
+        )
+
         self.button_box.rejected.connect(self.reject)
 
         layout.addWidget(self.button_box)
 
     def validate_and_accept(self):
-        """Ensure the event title is not empty before saving."""
+        """Validate the event title."""
 
-        title = self.title_edit.text().strip()
-
-        if not title:
+        if not self.title_edit.text().strip():
             QMessageBox.warning(
                 self,
                 "Missing Title",
@@ -153,7 +159,7 @@ class EventDialog(QDialog):
         self.accept()
 
     def get_event_data(self):
-        """Return the entered event information as a dictionary."""
+        """Return the event data as a dictionary."""
 
         return {
             "date": self.date_edit.date().toString("yyyy-MM-dd"),
@@ -164,83 +170,98 @@ class EventDialog(QDialog):
         }
 
 
-# ---------------------------------------------------------
-# Main calendar application
-# ---------------------------------------------------------
+# =========================================================
+# Main Calendar Application
+# =========================================================
 
 class CalendarApp(QMainWindow):
     """
-    Main calendar window.
+    Calendar application with:
 
-    Features:
         - Month navigation
-        - Calendar day selection
+        - Day selection
         - Today highlighting
         - Event creation
-        - Persistent event storage in config.ini
-        - Event indicators and tooltips
+        - Selected-day event panel
+        - Event persistence
+        - Light and dark themes
     """
 
     def __init__(self):
         super().__init__()
 
         self.setWindowTitle("PyQt6 Calendar")
-        self.resize(700, 600)
+        self.resize(850, 750)
 
         # Current displayed month.
         self.current_date = QDate.currentDate()
 
-        # Active selected date.
+        # Currently selected day.
         self.selected_date = QDate.currentDate()
 
-        # List containing all loaded and saved events.
+        # Event collection.
         self.events = []
 
-        # Dictionary mapping QDate objects to day buttons.
+        # Calendar date -> button.
         self.day_buttons = {}
 
-        # Load saved events before building the calendar.
+        # Current theme.
+        self.dark_mode = False
+
+        # Load persisted events.
         self.load_events()
 
-        # Build the main window.
+        # Build UI.
         self.setup_ui()
 
-        # Display the current month.
+        # Populate calendar and event panel.
         self.update_calendar()
 
-        # Apply application styling.
+        # Apply light theme.
         self.apply_stylesheet()
 
-    # -----------------------------------------------------
-    # Main window setup
-    # -----------------------------------------------------
+    # =====================================================
+    # Main UI
+    # =====================================================
 
     def setup_ui(self):
-        """Create the top, middle, and bottom panels."""
+        """Create the main window panels."""
 
         central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
 
         main_layout = QVBoxLayout(central_widget)
+
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(15)
 
         # -------------------------------------------------
-        # Top panel: month navigation
+        # TOP PANEL
         # -------------------------------------------------
 
-        top_panel = QWidget(self)
-        top_panel.setObjectName("topPanel")
+        self.top_panel = QWidget(self)
+        self.top_panel.setObjectName("topPanel")
 
-        top_layout = QHBoxLayout(top_panel)
+        top_layout = QHBoxLayout(self.top_panel)
+
         top_layout.setContentsMargins(10, 10, 10, 10)
+        top_layout.setSpacing(10)
 
+        # Previous month.
         self.previous_button = QPushButton("<")
         self.previous_button.setFixedSize(45, 40)
         self.previous_button.setToolTip("Previous month")
 
+        self.previous_button.clicked.connect(
+            self.previous_month
+        )
+
+        # Month/year label.
         self.month_label = QLabel()
-        self.month_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.month_label.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
 
         self.month_label.setFont(
             QFont("Arial", 16, QFont.Weight.Bold)
@@ -251,37 +272,49 @@ class CalendarApp(QMainWindow):
             QSizePolicy.Policy.Preferred,
         )
 
+        # Next month.
         self.next_button = QPushButton(">")
         self.next_button.setFixedSize(45, 40)
         self.next_button.setToolTip("Next month")
-
-        self.previous_button.clicked.connect(
-            self.previous_month
-        )
 
         self.next_button.clicked.connect(
             self.next_month
         )
 
+        # Theme toggle.
+        self.theme_button = QPushButton("☾ Dark Mode")
+        self.theme_button.setMinimumSize(120, 40)
+
+        self.theme_button.setToolTip(
+            "Switch between light and dark mode"
+        )
+
+        self.theme_button.clicked.connect(
+            self.toggle_theme
+        )
+
         top_layout.addWidget(self.previous_button)
         top_layout.addWidget(self.month_label, 1)
         top_layout.addWidget(self.next_button)
+        top_layout.addWidget(self.theme_button)
 
-        main_layout.addWidget(top_panel)
+        main_layout.addWidget(self.top_panel)
 
         # -------------------------------------------------
-        # Middle panel: calendar grid
+        # CALENDAR PANEL
         # -------------------------------------------------
 
-        calendar_panel = QWidget(self)
-        calendar_panel.setObjectName("calendarPanel")
+        self.calendar_panel = QWidget(self)
+        self.calendar_panel.setObjectName("calendarPanel")
 
-        calendar_layout = QVBoxLayout(calendar_panel)
+        calendar_layout = QVBoxLayout(self.calendar_panel)
+
         calendar_layout.setContentsMargins(10, 10, 10, 10)
-        calendar_layout.setSpacing(5)
+        calendar_layout.setSpacing(8)
 
         # Weekday headings.
         weekday_layout = QGridLayout()
+
         weekday_layout.setSpacing(5)
 
         weekdays = [
@@ -295,226 +328,538 @@ class CalendarApp(QMainWindow):
         ]
 
         for column, weekday in enumerate(weekdays):
+
             label = QLabel(weekday)
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            label.setAlignment(
+                Qt.AlignmentFlag.AlignCenter
+            )
 
             label.setFont(
                 QFont("Arial", 10, QFont.Weight.Bold)
             )
 
-            weekday_layout.addWidget(label, 0, column)
+            weekday_layout.addWidget(
+                label,
+                0,
+                column,
+            )
 
         calendar_layout.addLayout(weekday_layout)
 
-        # Day buttons are dynamically rebuilt for each month.
+        # Calendar grid.
         self.calendar_grid = QGridLayout()
+
         self.calendar_grid.setSpacing(5)
+
+        self.calendar_grid.setContentsMargins(
+            0,
+            0,
+            0,
+            0,
+        )
 
         calendar_layout.addLayout(self.calendar_grid)
 
-        # Allow the calendar to expand vertically.
-        calendar_layout.addStretch()
-
-        main_layout.addWidget(calendar_panel, 1)
+        main_layout.addWidget(self.calendar_panel)
 
         # -------------------------------------------------
-        # Bottom panel: add event
+        # SELECTED-DAY EVENT PANEL
         # -------------------------------------------------
 
-        bottom_panel = QWidget(self)
-        bottom_panel.setObjectName("bottomPanel")
+        self.event_panel = QWidget(self)
+        self.event_panel.setObjectName("eventPanel")
 
-        bottom_layout = QHBoxLayout(bottom_panel)
-        bottom_layout.setContentsMargins(10, 10, 10, 10)
+        event_panel_layout = QVBoxLayout(self.event_panel)
+
+        event_panel_layout.setContentsMargins(
+            15,
+            12,
+            15,
+            12,
+        )
+
+        event_panel_layout.setSpacing(8)
+
+        # Selected-day title.
+        self.event_panel_title = QLabel()
+
+        self.event_panel_title.setFont(
+            QFont("Arial", 12, QFont.Weight.Bold)
+        )
+
+        event_panel_layout.addWidget(
+            self.event_panel_title
+        )
+
+        # Event count.
+        self.event_count_label = QLabel()
+
+        event_panel_layout.addWidget(
+            self.event_count_label
+        )
+
+        # Event list.
+        self.event_list = QListWidget()
+
+        self.event_list.setMinimumHeight(120)
+        self.event_list.setMaximumHeight(220)
+
+        self.event_list.setSelectionMode(
+            QListWidget.SelectionMode.NoSelection
+        )
+
+        self.event_list.setWordWrap(True)
+
+        event_panel_layout.addWidget(
+            self.event_list
+        )
+
+        main_layout.addWidget(self.event_panel)
+
+        # -------------------------------------------------
+        # BOTTOM PANEL
+        # -------------------------------------------------
+
+        self.bottom_panel = QWidget(self)
+        self.bottom_panel.setObjectName("bottomPanel")
+
+        bottom_layout = QHBoxLayout(self.bottom_panel)
+
+        bottom_layout.setContentsMargins(
+            10,
+            10,
+            10,
+            10,
+        )
 
         bottom_layout.addStretch()
 
         self.add_event_button = QPushButton("Add Event")
-        self.add_event_button.setMinimumSize(150, 45)
+
+        self.add_event_button.setObjectName(
+            "addEventButton"
+        )
+
+        self.add_event_button.setMinimumSize(
+            160,
+            45,
+        )
 
         self.add_event_button.clicked.connect(
             self.add_event
         )
 
-        bottom_layout.addWidget(self.add_event_button)
+        bottom_layout.addWidget(
+            self.add_event_button
+        )
 
         bottom_layout.addStretch()
 
-        main_layout.addWidget(bottom_panel)
+        main_layout.addWidget(self.bottom_panel)
 
-    # -----------------------------------------------------
-    # Stylesheet
-    # -----------------------------------------------------
+    # =====================================================
+    # Light / Dark Theme
+    # =====================================================
+
+    def toggle_theme(self):
+        """Toggle between light mode and dark mode."""
+
+        self.dark_mode = not self.dark_mode
+
+        if self.dark_mode:
+            self.theme_button.setText("☀ Light Mode")
+        else:
+            self.theme_button.setText("☾ Dark Mode")
+
+        self.apply_stylesheet()
+
+        # Reapply calendar button styling.
+        for button in self.day_buttons.values():
+
+            button.style().unpolish(button)
+            button.style().polish(button)
 
     def apply_stylesheet(self):
-        """Apply a modern, light‑theme stylesheet with readable dropdown text."""
-        self.setStyleSheet(
-            """
-            QMainWindow {
-                background-color: #f4f6f8;
-            }
+        """
+        Apply the supplied light stylesheet or its dark-mode
+        equivalent.
 
-            QWidget#topPanel,
-            QWidget#calendarPanel,
-            QWidget#bottomPanel {
-                background-color: #ffffff;
-                border-radius: 10px;
-            }
+        Dropdown popup text is explicitly styled to remain
+        readable in both themes.
+        """
 
-            /* ----- generic text ------------------------------------------------- */
-            QLabel,
-            QLineEdit,
-            QTextEdit,
-            QDateEdit,
-            QTimeEdit,
-            QComboBox {
-                color: #263238;            /* dark text on white background */
-            }
+        if not self.dark_mode:
 
-            /* ----- dropdown list (popup) --------------------------------------- */
-            QComboBox QAbstractItemView,
-            QComboBox QAbstractItemView::item {
-                background-color: white;   /* same as the combo box */
-                color: #263238;            /* dark, readable text */
-            }
+            # -------------------------------------------------
+            # LIGHT MODE
+            # -------------------------------------------------
 
-            /* ----- push‑buttons ------------------------------------------------- */
-            QPushButton {
-                background-color: #e8edf2;
-                color: #263238;
-                border: 1px solid #d4dce5;
-                border-radius: 6px;
-                padding: 6px;
-                font-size: 11pt;
-            }
+            self.setStyleSheet(
+                """
+                QMainWindow {
+                    background-color: #f4f6f8;
+                }
 
-            QPushButton:hover {
-                background-color: #dbe6f2;
-            }
+                QWidget#topPanel,
+                QWidget#calendarPanel,
+                QWidget#bottomPanel,
+                QWidget#eventPanel {
+                    background-color: #ffffff;
+                    border-radius: 10px;
+                }
 
-            QPushButton:pressed {
-                background-color: #c9d8e8;
-            }
+                /* Generic text */
 
-            /* ----- day cells ---------------------------------------------------- */
-            QPushButton#dayButton {
-                background-color: #ffffff;
-                border: 1px solid #e0e5eb;
-                border-radius: 6px;
-                color: #263238;
-                font-size: 11pt;
-            }
+                QLabel,
+                QLineEdit,
+                QTextEdit,
+                QDateEdit,
+                QTimeEdit,
+                QComboBox {
+                    color: #263238;
+                }
 
-            QPushButton#dayButton:hover {
-                background-color: #eaf2fb;
-                border: 1px solid #7ba7d8;
-            }
+                /* Dropdown popup */
 
-            QPushButton#dayButton[today="true"] {
-                background-color: #2878d0;
-                color: white;
-                border: 2px solid #155ba0;
-                font-weight: bold;
-            }
+                QComboBox QAbstractItemView,
+                QComboBox QAbstractItemView::item {
+                    background-color: white;
+                    color: #263238;
+                }
 
-            QPushButton#dayButton[selected="true"] {
-                background-color: #f39c35;
-                color: white;
-                border: 2px solid #d97706;
-                font-weight: bold;
-            }
+                QComboBox QAbstractItemView::item:selected {
+                    background-color: #2878d0;
+                    color: white;
+                }
 
-            QPushButton#dayButton[today="true"][selected="true"] {
-                background-color: #e58a22;
-                color: white;
-                border: 3px solid #155ba0;
-                font-weight: bold;
-            }
+                /* Push buttons */
 
-            QPushButton#dayButton[hasEvents="true"] {
-                font-weight: bold;
-            }
+                QPushButton {
+                    background-color: #e8edf2;
+                    color: #263238;
+                    border: 1px solid #d4dce5;
+                    border-radius: 6px;
+                    padding: 6px;
+                    font-size: 11pt;
+                }
 
-            QPushButton#dayButton:disabled {
-                background-color: #f0f2f4;
-                color: #b0b8c0;
-                border: 1px solid #e5e8eb;
-            }
+                QPushButton:hover {
+                    background-color: #dbe6f2;
+                }
 
-            QPushButton#addEventButton {
-                background-color: #2878d0;
-                color: white;
-                border: none;
-                border-radius: 8px;
-                font-weight: bold;
-            }
+                QPushButton:pressed {
+                    background-color: #c9d8e8;
+                }
 
-            QPushButton#addEventButton:hover {
-                background-color: #1c65b4;
-            }
+                /* Calendar day cells */
 
-            QDialog {
-                background-color: #f4f6f8;
-            }
+                QPushButton#dayButton {
+                    background-color: #ffffff;
+                    border: 1px solid #e0e5eb;
+                    border-radius: 6px;
+                    color: #263238;
+                    font-size: 11pt;
+                }
 
-            QLineEdit,
-            QTextEdit,
-            QDateEdit,
-            QTimeEdit,
-            QComboBox {
-                background-color: white;
-                border: 1px solid #d4dce5;
-                border-radius: 5px;
-                padding: 5px;
-            }
+                QPushButton#dayButton:hover {
+                    background-color: #eaf2fb;
+                    border: 1px solid #7ba7d8;
+                }
 
-            QLineEdit:focus,
-            QTextEdit:focus,
-            QDateEdit:focus,
-            QTimeEdit:focus,
-            QComboBox:focus {
-                border: 1px solid #2878d0;
-            }
+                QPushButton#dayButton[today="true"] {
+                    background-color: #2878d0;
+                    color: white;
+                    border: 2px solid #155ba0;
+                    font-weight: bold;
+                }
 
-            QDialogButtonBox QPushButton {
-                min-width: 80px;
-            }
-            """
-        )
+                QPushButton#dayButton[selected="true"] {
+                    background-color: #f39c35;
+                    color: white;
+                    border: 2px solid #d97706;
+                    font-weight: bold;
+                }
 
+                QPushButton#dayButton[today="true"][selected="true"] {
+                    background-color: #e58a22;
+                    color: white;
+                    border: 3px solid #155ba0;
+                    font-weight: bold;
+                }
 
+                QPushButton#dayButton[hasEvents="true"] {
+                    font-weight: bold;
+                }
 
-        self.add_event_button.setObjectName("addEventButton")
+                QPushButton#dayButton:disabled {
+                    background-color: #f0f2f4;
+                    color: #b0b8c0;
+                    border: 1px solid #e5e8eb;
+                }
 
-    # -----------------------------------------------------
-    # Month navigation
-    # -----------------------------------------------------
+                /* Add Event button */
+
+                QPushButton#addEventButton {
+                    background-color: #2878d0;
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
+                    font-weight: bold;
+                }
+
+                QPushButton#addEventButton:hover {
+                    background-color: #1c65b4;
+                }
+
+                /* Event list */
+
+                QListWidget {
+                    background-color: #f8fafc;
+                    color: #263238;
+                    border: 1px solid #e0e5eb;
+                    border-radius: 6px;
+                    padding: 5px;
+                }
+
+                QListWidget::item {
+                    background-color: #ffffff;
+                    color: #263238;
+                    padding: 8px;
+                    border-bottom: 1px solid #e0e5eb;
+                }
+
+                /* Dialog */
+
+                QDialog {
+                    background-color: #f4f6f8;
+                }
+
+                QLineEdit,
+                QTextEdit,
+                QDateEdit,
+                QTimeEdit,
+                QComboBox {
+                    background-color: white;
+                    border: 1px solid #d4dce5;
+                    border-radius: 5px;
+                    padding: 5px;
+                }
+
+                QLineEdit:focus,
+                QTextEdit:focus,
+                QDateEdit:focus,
+                QTimeEdit:focus,
+                QComboBox:focus {
+                    border: 1px solid #2878d0;
+                }
+
+                QDialogButtonBox QPushButton {
+                    min-width: 80px;
+                }
+                """
+            )
+
+        else:
+
+            # -------------------------------------------------
+            # DARK MODE
+            # -------------------------------------------------
+
+            self.setStyleSheet(
+                """
+                QMainWindow {
+                    background-color: #171a21;
+                }
+
+                QWidget#topPanel,
+                QWidget#calendarPanel,
+                QWidget#bottomPanel,
+                QWidget#eventPanel {
+                    background-color: #232833;
+                    border-radius: 10px;
+                }
+
+                /* Generic text */
+
+                QLabel,
+                QLineEdit,
+                QTextEdit,
+                QDateEdit,
+                QTimeEdit,
+                QComboBox {
+                    color: #e6edf3;
+                }
+
+                /* Dropdown popup */
+
+                QComboBox QAbstractItemView,
+                QComboBox QAbstractItemView::item {
+                    background-color: #2b3240;
+                    color: #e6edf3;
+                }
+
+                QComboBox QAbstractItemView::item:selected {
+                    background-color: #2878d0;
+                    color: white;
+                }
+
+                /* Push buttons */
+
+                QPushButton {
+                    background-color: #343d4c;
+                    color: #e6edf3;
+                    border: 1px solid #465164;
+                    border-radius: 6px;
+                    padding: 6px;
+                    font-size: 11pt;
+                }
+
+                QPushButton:hover {
+                    background-color: #414d60;
+                }
+
+                QPushButton:pressed {
+                    background-color: #28313f;
+                }
+
+                /* Calendar day cells */
+
+                QPushButton#dayButton {
+                    background-color: #2b3240;
+                    border: 1px solid #414b5d;
+                    border-radius: 6px;
+                    color: #e6edf3;
+                    font-size: 11pt;
+                }
+
+                QPushButton#dayButton:hover {
+                    background-color: #39465a;
+                    border: 1px solid #7ba7d8;
+                }
+
+                QPushButton#dayButton[today="true"] {
+                    background-color: #2878d0;
+                    color: white;
+                    border: 2px solid #155ba0;
+                    font-weight: bold;
+                }
+
+                QPushButton#dayButton[selected="true"] {
+                    background-color: #f39c35;
+                    color: white;
+                    border: 2px solid #d97706;
+                    font-weight: bold;
+                }
+
+                QPushButton#dayButton[today="true"][selected="true"] {
+                    background-color: #e58a22;
+                    color: white;
+                    border: 3px solid #155ba0;
+                    font-weight: bold;
+                }
+
+                QPushButton#dayButton[hasEvents="true"] {
+                    font-weight: bold;
+                }
+
+                QPushButton#dayButton:disabled {
+                    background-color: #20252d;
+                    color: #626b78;
+                    border: 1px solid #303742;
+                }
+
+                /* Add Event button */
+
+                QPushButton#addEventButton {
+                    background-color: #2878d0;
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
+                    font-weight: bold;
+                }
+
+                QPushButton#addEventButton:hover {
+                    background-color: #1c65b4;
+                }
+
+                /* Event list */
+
+                QListWidget {
+                    background-color: #1c222c;
+                    color: #e6edf3;
+                    border: 1px solid #414b5d;
+                    border-radius: 6px;
+                    padding: 5px;
+                }
+
+                QListWidget::item {
+                    background-color: #2b3240;
+                    color: #e6edf3;
+                    padding: 8px;
+                    border-bottom: 1px solid #414b5d;
+                }
+
+                /* Dialog */
+
+                QDialog {
+                    background-color: #232833;
+                }
+
+                QLineEdit,
+                QTextEdit,
+                QDateEdit,
+                QTimeEdit,
+                QComboBox {
+                    background-color: #2b3240;
+                    color: #e6edf3;
+                    border: 1px solid #465164;
+                    border-radius: 5px;
+                    padding: 5px;
+                }
+
+                QLineEdit:focus,
+                QTextEdit:focus,
+                QDateEdit:focus,
+                QTimeEdit:focus,
+                QComboBox:focus {
+                    border: 1px solid #2878d0;
+                }
+
+                QDialogButtonBox QPushButton {
+                    min-width: 80px;
+                }
+                """
+            )
+
+    # =====================================================
+    # Month Navigation
+    # =====================================================
 
     def previous_month(self):
-        """Move the calendar backward by one month."""
+        """Navigate to the previous month."""
 
         self.current_date = self.current_date.addMonths(-1)
 
         self.update_calendar()
 
     def next_month(self):
-        """Move the calendar forward by one month."""
+        """Navigate to the next month."""
 
         self.current_date = self.current_date.addMonths(1)
 
         self.update_calendar()
 
-    # -----------------------------------------------------
-    # Calendar rebuilding
-    # -----------------------------------------------------
+    # =====================================================
+    # Calendar Rendering
+    # =====================================================
 
     def update_calendar(self):
         """
-        Rebuild the calendar grid for the currently displayed
-        month.
+        Rebuild the calendar grid.
 
-        QDate is used for month calculations, including leap
-        years and varying month lengths.
+        Uses QDate to correctly handle month lengths,
+        leap years, and month navigation.
         """
 
         self.month_label.setText(
@@ -523,6 +868,7 @@ class CalendarApp(QMainWindow):
 
         # Remove old day buttons.
         while self.calendar_grid.count():
+
             item = self.calendar_grid.takeAt(0)
 
             widget = item.widget()
@@ -532,26 +878,36 @@ class CalendarApp(QMainWindow):
 
         self.day_buttons.clear()
 
-        # Determine the month and year.
         year = self.current_date.year()
         month = self.current_date.month()
 
         first_day = QDate(year, month, 1)
 
-        # Number of days in the month.
         days_in_month = first_day.daysInMonth()
 
-        # Qt weekday: Monday=1 ... Sunday=7.
-        # Convert to Sunday=0 ... Saturday=6.
+        # Qt:
+        # Monday = 1
+        # Sunday = 7
+        #
+        # Convert to:
+        # Sunday = 0
+        # Monday = 1
+        # ...
+        # Saturday = 6
+
         first_weekday = first_day.dayOfWeek() % 7
 
         # -------------------------------------------------
-        # Build day buttons
+        # Create day buttons
         # -------------------------------------------------
 
         for day in range(1, days_in_month + 1):
 
-            current_day = QDate(year, month, day)
+            current_day = QDate(
+                year,
+                month,
+                day,
+            )
 
             button = QPushButton(str(day))
 
@@ -562,18 +918,61 @@ class CalendarApp(QMainWindow):
                 QSizePolicy.Policy.Expanding,
             )
 
-            button.setMinimumSize(65, 55)
+            button.setMinimumSize(
+                65,
+                55,
+            )
 
-            button.setProperty("today", False)
-            button.setProperty("selected", False)
-            button.setProperty("hasEvents", False)
+            button.setProperty(
+                "today",
+                current_day == QDate.currentDate(),
+            )
 
+            button.setProperty(
+                "selected",
+                current_day == self.selected_date,
+            )
+
+            day_events = self.get_events_for_date(
+                current_day
+            )
+
+            button.setProperty(
+                "hasEvents",
+                bool(day_events),
+            )
+
+            # Show an event marker.
+            if day_events:
+
+                button.setText(
+                    f"{day} •"
+                )
+
+                titles = "\n".join(
+                    event["title"]
+                    for event in day_events
+                )
+
+                button.setToolTip(
+                    f"Events:\n{titles}"
+                )
+
+            else:
+
+                button.setToolTip(
+                    current_day.toString(
+                        "dddd, MMMM d, yyyy"
+                    )
+                )
+
+            # Connect the day button.
             button.clicked.connect(
                 lambda checked=False, d=current_day:
                 self.select_day(d)
             )
 
-            # Calendar grid position.
+            # Sunday-first calendar position.
             position = first_weekday + day - 1
 
             row = position // 7
@@ -587,72 +986,47 @@ class CalendarApp(QMainWindow):
 
             self.day_buttons[current_day] = button
 
-            # Highlight today.
-            if current_day == QDate.currentDate():
-                button.setProperty("today", True)
-
-            # Restore selection when rebuilding the calendar.
-            if current_day == self.selected_date:
-                button.setProperty("selected", True)
-
-            # Display saved events.
-            day_events = self.get_events_for_date(current_day)
-
-            if day_events:
-                button.setProperty("hasEvents", True)
-
-                titles = "\n".join(
-                    event["title"]
-                    for event in day_events
-                )
-
-                button.setText(f"{day} •")
-
-                button.setToolTip(
-                    f"Events:\n{titles}"
-                )
-
-            else:
-                button.setToolTip(
-                    current_day.toString("dddd, MMMM d, yyyy")
-                )
-
-            # Refresh stylesheet properties.
+            # Apply dynamic stylesheet properties.
             button.style().unpolish(button)
             button.style().polish(button)
 
-        # Force layout updates.
+        # Allow the calendar to expand.
+        for row in range(6):
+
+            self.calendar_grid.setRowStretch(
+                row,
+                1,
+            )
+
+        for column in range(7):
+
+            self.calendar_grid.setColumnStretch(
+                column,
+                1,
+            )
+
         self.calendar_grid.invalidate()
         self.calendar_grid.activate()
 
-    # -----------------------------------------------------
-    # Day selection
-    # -----------------------------------------------------
+        # Update the selected-day event panel.
+        self.update_event_panel()
+
+    # =====================================================
+    # Day Selection
+    # =====================================================
 
     def select_day(self, selected_date):
-        """Select one date and visually update the grid."""
+        """Select a day and update the calendar and event list."""
 
         self.selected_date = selected_date
 
-        # Update button states.
-        for date_value, button in self.day_buttons.items():
-
-            is_selected = date_value == selected_date
-
-            button.setProperty(
-                "selected",
-                is_selected,
-            )
-
-            button.style().unpolish(button)
-            button.style().polish(button)
-
-        # If a date in another month was selected, update
-        # the displayed month.
+        # If the selected date belongs to another month,
+        # navigate to that month.
         if (
             selected_date.year() != self.current_date.year()
             or selected_date.month() != self.current_date.month()
         ):
+
             self.current_date = QDate(
                 selected_date.year(),
                 selected_date.month(),
@@ -661,17 +1035,134 @@ class CalendarApp(QMainWindow):
 
             self.update_calendar()
 
-    # -----------------------------------------------------
-    # Add event
-    # -----------------------------------------------------
+        else:
+
+            # Update selected button.
+            for date_value, button in self.day_buttons.items():
+
+                button.setProperty(
+                    "selected",
+                    date_value == selected_date,
+                )
+
+                button.style().unpolish(button)
+                button.style().polish(button)
+
+            self.update_event_panel()
+
+    # =====================================================
+    # Selected-Day Event Panel
+    # =====================================================
+
+    def update_event_panel(self):
+        """
+        Display all events occurring on the selected date.
+
+        This includes recurring events.
+        """
+
+        self.event_list.clear()
+
+        selected_date_text = self.selected_date.toString(
+            "dddd, MMMM d, yyyy"
+        )
+
+        self.event_panel_title.setText(
+            f"Events for {selected_date_text}"
+        )
+
+        day_events = self.get_events_for_date(
+            self.selected_date
+        )
+
+        event_count = len(day_events)
+
+        if event_count == 0:
+
+            self.event_count_label.setText(
+                "No events scheduled."
+            )
+
+            item = QListWidgetItem(
+                "No events for this day."
+            )
+
+            item.setFlags(
+                Qt.ItemFlag.NoItemFlags
+            )
+
+            self.event_list.addItem(item)
+
+            return
+
+        self.event_count_label.setText(
+            f"{event_count} event"
+            + ("s" if event_count != 1 else "")
+        )
+
+        # Sort by time.
+        day_events.sort(
+            key=lambda event: event.get("time", "09:00")
+        )
+
+        for event in day_events:
+
+            title = event.get(
+                "title",
+                "Untitled",
+            )
+
+            time_text = event.get(
+                "time",
+                "09:00",
+            )
+
+            repeat = event.get(
+                "repeat",
+                "None",
+            )
+
+            description = event.get(
+                "description",
+                "",
+            )
+
+            # Event list entry.
+            item_text = (
+                f"{time_text}  |  {title}"
+            )
+
+            if repeat != "None":
+
+                item_text += (
+                    f"\nRepeat: {repeat}"
+                )
+
+            if description.strip():
+
+                item_text += (
+                    f"\n{description.strip()}"
+                )
+
+            item = QListWidgetItem(
+                item_text
+            )
+
+            item.setToolTip(
+                f"{title}\n"
+                f"Time: {time_text}\n"
+                f"Repeat: {repeat}\n"
+                f"Description: {description}"
+            )
+
+            self.event_list.addItem(item)
+
+    # =====================================================
+    # Add Event
+    # =====================================================
 
     def add_event(self):
-        """
-        Open the event dialog.
-
-        The selected calendar date is used as the initial
-        date in the dialog.
-        """
+        """Open the event dialog and save a new event."""
 
         dialog = EventDialog(
             self.selected_date,
@@ -683,24 +1174,20 @@ class CalendarApp(QMainWindow):
 
         event_data = dialog.get_event_data()
 
-        # Create a new unique event section.
-        event_id = self.get_next_event_id()
+        event_data["id"] = self.get_next_event_id()
 
-        event_data["id"] = event_id
-
-        # Add the event to memory.
+        # Add event to memory.
         self.events.append(event_data)
 
-        # Persist all events.
+        # Save immediately.
         if not self.save_events():
-            # Roll back the in-memory addition if saving
-            # fails, so memory and disk stay consistent.
+
+            # Roll back the event if saving failed.
             self.events.pop()
 
             return
 
-        # If the user changed the event date in the dialog,
-        # display that month and select the new event date.
+        # Select the event's date.
         event_date = QDate.fromString(
             event_data["date"],
             "yyyy-MM-dd",
@@ -708,54 +1195,68 @@ class CalendarApp(QMainWindow):
 
         self.selected_date = event_date
 
+        # Navigate to the event's month.
         self.current_date = QDate(
             event_date.year(),
             event_date.month(),
             1,
         )
 
+        # Rebuild calendar and event panel.
         self.update_calendar()
 
-    # -----------------------------------------------------
-    # Event storage
-    # -----------------------------------------------------
+    # =====================================================
+    # Event ID Generation
+    # =====================================================
 
     def get_next_event_id(self):
         """
-        Return the next available event section name.
+        Generate a unique event section name.
 
-        Existing event IDs are retained when loading and
-        saving, preventing sections from being overwritten.
+        Example:
+            event_1
+            event_2
+            event_3
         """
 
         existing_ids = []
 
         for event in self.events:
-            event_id = event.get("id", "")
+
+            event_id = event.get(
+                "id",
+                "",
+            )
 
             if event_id.startswith("event_"):
+
                 try:
-                    number = int(event_id.split("_", 1)[1])
+
+                    number = int(
+                        event_id.split("_", 1)[1]
+                    )
+
                     existing_ids.append(number)
+
                 except ValueError:
                     pass
 
-        next_number = max(existing_ids, default=0) + 1
+        next_number = max(
+            existing_ids,
+            default=0,
+        ) + 1
 
         return f"event_{next_number}"
+
+    # =====================================================
+    # Load Events
+    # =====================================================
 
     def load_events(self):
         """
         Load events from config.ini.
 
-        Each event is stored in a separate section:
-
-            [event_1]
-            date = 2026-11-05
-            time = 09:00
-            repeat = None
-            title = Example
-            description = Example description
+        Each event is stored in its own section.
         """
 
         self.events = []
@@ -766,6 +1267,7 @@ class CalendarApp(QMainWindow):
             return
 
         try:
+
             config.read(
                 CONFIG_FILE,
                 encoding="utf-8",
@@ -802,10 +1304,10 @@ class CalendarApp(QMainWindow):
                         section,
                         "description",
                         fallback="",
-                ),
+                    ),
                 }
 
-                # Validate the date.
+                # Validate date.
                 event_date = QDate.fromString(
                     event["date"],
                     "yyyy-MM-dd",
@@ -821,36 +1323,47 @@ class CalendarApp(QMainWindow):
                 )
 
                 if not event_time.isValid():
+
                     event["time"] = "09:00"
 
-                # Validate repeat option.
+                # Validate recurrence.
                 if event["repeat"] not in REPEAT_OPTIONS:
+
                     event["repeat"] = "None"
 
                 self.events.append(event)
 
-        except (OSError, configparser.Error) as error:
+        except (
+            OSError,
+            configparser.Error,
+        ) as error:
 
             QMessageBox.warning(
                 self,
                 "Load Error",
-                f"Could not load calendar events:\n{error}",
+                f"Could not load events:\n{error}",
             )
+
+    # =====================================================
+    # Save Events
+    # =====================================================
 
     def save_events(self):
         """
-        Save all events to config.ini.
+        Save every event to config.ini.
 
-        The configuration file is written to a temporary
-        file first and then replaced atomically.
+        Uses a temporary file and os.replace() to avoid
+        leaving a partially written configuration file.
         """
 
         config = configparser.ConfigParser()
 
-        # Preserve all event sections.
         for event in self.events:
 
-            section = event.get("id")
+            section = event.get(
+                "id",
+                "",
+            )
 
             if not section:
                 continue
@@ -863,7 +1376,6 @@ class CalendarApp(QMainWindow):
                 "description": event["description"],
             }
 
-        # Temporary file in the same directory.
         temporary_file = CONFIG_FILE + ".tmp"
 
         try:
@@ -876,7 +1388,7 @@ class CalendarApp(QMainWindow):
 
                 config.write(file)
 
-            # Replace config.ini with the complete file.
+            # Replace the existing configuration file.
             os.replace(
                 temporary_file,
                 CONFIG_FILE,
@@ -896,32 +1408,38 @@ class CalendarApp(QMainWindow):
                 ),
             )
 
-            # Remove incomplete temporary file.
+            # Remove temporary file if possible.
             try:
+
                 if os.path.exists(temporary_file):
+
                     os.remove(temporary_file)
+
             except OSError:
                 pass
 
             return False
 
-    # -----------------------------------------------------
-    # Event lookup
-    # -----------------------------------------------------
+    # =====================================================
+    # Event Lookup and Recurrence
+    # =====================================================
 
     def get_events_for_date(self, target_date):
         """
-        Return events occurring on a specified date.
+        Return all events occurring on target_date.
 
-        Repeat options are interpreted as:
-            None             - Only the original date
-            Every day        - Daily
-            Every week       - Weekly
-            Every other week  - Every 14 days
-            Every month      - Same day of each month
+        Recurrence:
+            None
+            Every day
+            Every week
+            Every other week
+            Every month
 
-        Monthly recurrence skips months that do not contain
-        the original day number.
+        Recurring events continue indefinitely.
+
+        Monthly events occur on the same day number.
+        For example, a January 31 event does not occur
+        in February because February has no day 31.
         """
 
         matching_events = []
@@ -936,30 +1454,46 @@ class CalendarApp(QMainWindow):
             if not original_date.isValid():
                 continue
 
-            repeat = event.get("repeat", "None")
+            repeat = event.get(
+                "repeat",
+                "None",
+            )
 
+            # No recurrence.
             if repeat == "None":
 
-                occurs = target_date == original_date
+                occurs = (
+                    target_date == original_date
+                )
 
+            # Daily recurrence.
             elif repeat == "Every day":
 
-                occurs = target_date >= original_date
+                occurs = (
+                    target_date >= original_date
+                )
 
+            # Weekly recurrence.
             elif repeat == "Every week":
 
                 occurs = (
                     target_date >= original_date
-                    and original_date.daysTo(target_date) % 7 == 0
+                    and original_date.daysTo(
+                        target_date
+                    ) % 7 == 0
                 )
 
+            # Every two weeks.
             elif repeat == "Every other week":
 
                 occurs = (
                     target_date >= original_date
-                    and original_date.daysTo(target_date) % 14 == 0
+                    and original_date.daysTo(
+                        target_date
+                    ) % 14 == 0
                 )
 
+            # Monthly recurrence.
             elif repeat == "Every month":
 
                 occurs = self.is_monthly_occurrence(
@@ -969,21 +1503,24 @@ class CalendarApp(QMainWindow):
 
             else:
 
-                occurs = target_date == original_date
+                occurs = (
+                    target_date == original_date
+                )
 
             if occurs:
+
                 matching_events.append(event)
 
         return matching_events
 
     @staticmethod
-    def is_monthly_occurrence(original_date, target_date):
+    def is_monthly_occurrence(
+        original_date,
+        target_date,
+    ):
         """
-        Check whether target_date is a valid monthly
+        Determine whether target_date is a monthly
         occurrence of original_date.
-
-        For example, an event on January 31 will not
-        occur in February because February has no day 31.
         """
 
         if target_date < original_date:
@@ -1000,35 +1537,43 @@ class CalendarApp(QMainWindow):
 
         return month_difference >= 0
 
-    # -----------------------------------------------------
-    # Application entry point
-    # -----------------------------------------------------
+    # =====================================================
+    # Close Event
+    # =====================================================
 
     def closeEvent(self, event):
         """
-        Ensure all events are persisted before closing.
+        Save events before closing.
 
-        Events are already saved when created, but this
-        provides an additional safety check.
+        Events are already saved immediately after creation,
+        but this provides an additional persistence check.
         """
 
         if self.save_events():
+
             event.accept()
+
         else:
+
             event.ignore()
 
 
-# ---------------------------------------------------------
-# Run application
-# ---------------------------------------------------------
+# =========================================================
+# Application Entry Point
+# =========================================================
 
 if __name__ == "__main__":
 
     app = QApplication(sys.argv)
 
-    app.setApplicationName("PyQt6 Calendar")
+    app.setApplicationName(
+        "PyQt6 Calendar"
+    )
 
     window = CalendarApp()
+
     window.show()
 
-    sys.exit(app.exec())
+    sys.exit(
+        app.exec()
+    )
