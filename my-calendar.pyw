@@ -44,6 +44,7 @@ REPEAT_OPTIONS = [
     "Every week",
     "Every other week",
     "Every month",
+    "Every year"
 ]
 
 
@@ -1434,6 +1435,7 @@ class CalendarApp(QMainWindow):
             Every week
             Every other week
             Every month
+            Every year          # <-- newly supported
 
         Recurring events continue indefinitely.
 
@@ -1454,78 +1456,51 @@ class CalendarApp(QMainWindow):
             if not original_date.isValid():
                 continue
 
-            repeat = event.get(
-                "repeat",
-                "None",
-            )
+            repeat = event.get("repeat", "None")
 
             # No recurrence.
             if repeat == "None":
-
-                occurs = (
-                    target_date == original_date
-                )
+                occurs = (target_date == original_date)
 
             # Daily recurrence.
             elif repeat == "Every day":
-
-                occurs = (
-                    target_date >= original_date
-                )
+                occurs = (target_date >= original_date)
 
             # Weekly recurrence.
             elif repeat == "Every week":
-
                 occurs = (
                     target_date >= original_date
-                    and original_date.daysTo(
-                        target_date
-                    ) % 7 == 0
+                    and original_date.daysTo(target_date) % 7 == 0
                 )
 
             # Every two weeks.
             elif repeat == "Every other week":
-
                 occurs = (
                     target_date >= original_date
-                    and original_date.daysTo(
-                        target_date
-                    ) % 14 == 0
+                    and original_date.daysTo(target_date) % 14 == 0
                 )
 
             # Monthly recurrence.
             elif repeat == "Every month":
+                occurs = self.is_monthly_occurrence(original_date, target_date)
 
-                occurs = self.is_monthly_occurrence(
-                    original_date,
-                    target_date,
-                )
+            # Yearly recurrence.
+            elif repeat == "Every year":
+                occurs = self.is_yearly_occurrence(original_date, target_date)
 
             else:
-
-                occurs = (
-                    target_date == original_date
-                )
+                occurs = (target_date == original_date)
 
             if occurs:
-
                 matching_events.append(event)
 
         return matching_events
 
     @staticmethod
-    def is_monthly_occurrence(
-        original_date,
-        target_date,
-    ):
-        """
-        Determine whether target_date is a monthly
-        occurrence of original_date.
-        """
-
+    def is_monthly_occurrence(original_date, target_date):
+        """Determine whether target_date is a monthly occurrence of original_date."""
         if target_date < original_date:
             return False
-
         if target_date.day() != original_date.day():
             return False
 
@@ -1534,8 +1509,25 @@ class CalendarApp(QMainWindow):
             + target_date.month()
             - original_date.month()
         )
-
         return month_difference >= 0
+
+    @staticmethod
+    def is_yearly_occurrence(original_date, target_date):
+        """Determine whether target_date is a yearly occurrence of original_date."""
+        # The event cannot occur before it is created.
+        if target_date < original_date:
+            return False
+
+        # Must be the same month and day (e.g., Jan 15 each year).
+        if (
+            target_date.month() != original_date.month()
+            or target_date.day() != original_date.day()
+        ):
+            return False
+
+        # Any later year is a valid occurrence.
+        return target_date.year() >= original_date.year()
+
 
     # =====================================================
     # Close Event
